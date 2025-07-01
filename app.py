@@ -1,7 +1,7 @@
 import asyncio
 import re
 from typing import List, Dict, Set
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
