@@ -386,10 +386,11 @@ async def crawl_url(link, context, visited, base_url, semaphore):
 
             # ✅ Main page scan
             try:
-                html = await page.content()
-                await process_async(html, link)
+                result = await check_page_content(page, link)
+                results.append(result)
             except Exception as e:
-                logger.warning(f"[Main Page] Failed to process {link}: {e}")
+                logger.warning(f"[Main Page] Failed to check content: {e}")
+
 
             # 🔍 Iframe scan
             for frame in page.frames:
@@ -397,10 +398,11 @@ async def crawl_url(link, context, visited, base_url, semaphore):
                     frame_url = frame.url
                     if urlparse(link).netloc not in urlparse(frame_url).netloc:
                         continue
-                    frame_html = await frame.content()
-                    await process_async(frame_html, frame_url)
+                    result = await check_page_content(frame, frame_url)
+                    results.append(result)
                 except Exception as e:
-                    logger.warning(f"[Iframe] Failed to process {frame.url}: {e}")
+                    logger.warning(f"[Iframe] Failed to check iframe content: {e}")
+
 
             # ✅ Collect links for further crawling
             anchors = await page.eval_on_selector_all("a", "els => els.map(el => el.href)")
