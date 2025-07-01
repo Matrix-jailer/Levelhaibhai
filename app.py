@@ -283,15 +283,23 @@ async def check_page_content(page, url: str) -> Dict[str, Any]:
     }
 
     try:
-        # Main HTML
         html = await page.content()
-        for gateway, patterns in GATEWAY_KEYWORDS.items():
-            if check_keywords(html, patterns):
-                results["payment_gateways"].append(gateway)
-                # Check 3D Secure only if gateway found
-                if check_keywords(html, THREE_D_SECURE_KEYWORDS):
-                    results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(html)])
-
+        if hasattr(page, "frames"):
+            for frame in page.frames:
+                try:
+                    frame_url = frame.url
+                    if urlparse(url).netloc not in urlparse(frame_url).netloc:
+                        continue
+                    frame_html = await frame.content()
+                    for gateway, patterns in GATEWAY_KEYWORDS.items():
+                        if check_keywords(frame_html, patterns):
+                            results["payment_gateways"].append(gateway)
+                            if check_keywords(frame_html, THREE_D_SECURE_KEYWORDS):
+                                results["3d_secure"].extend([
+                                    kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(frame_html)
+                                ])
+                except Exception as iframe_err:
+                    logger.warning(f"[Iframe] Skipped frame due to error: {iframe_err}")
         for captcha_type, patterns in CAPTCHA_PATTERNS.items():
             if check_keywords(html, patterns):
                 results["captcha"].append(captcha_type)
