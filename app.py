@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import re
+from playwright_stealth import stealth_async
 from typing import List, Dict, Any
 from urllib.parse import urlparse, urljoin
 from selenium.webdriver.support import expected_conditions as EC
@@ -372,44 +373,47 @@ async def check_page_content(page, url: str) -> Dict[str, Any]:
 
     return results
 
-async def crawl_url(url: str, context, visited: set, base_url: str, semaphore: asyncio.Semaphore) -> List[Dict[str, Any]]:
-    """Crawl a single URL and extract keywords and links."""
+async def crawl_url(link, context, visited, base_url, semaphore):
+    results = []
     async with semaphore:
-        results = []
-        if url in visited:
-            return results
-        visited.add(url)
+        if link in visited:
+            return []
+        visited.add(link)
 
         try:
             page = await context.new_page()
-            await page.set_extra_http_headers({
-                "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            })
-            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-            await human_like_behavior(page)
+            await page.goto(link, timeout=15000, wait_until="networkidle")
 
-            # Check page content
-            page_results = await check_page_content(page, url)
-            results.append({"url": url, **page_results})
+            # ✅ Main page scan
+            try:
+                html = await page.content()
+                await process_async(html, link)
+            except Exception as e:
+                logger.warning(f"[Main Page] Failed to process {link}: {e}")
 
-            # Extract payment-related links
-            links = await page.query_selector_all('a')
-            hrefs = [await link.get_attribute('href') for link in links]
-            payment_urls = [
-                urljoin(url, href) for href in hrefs
-                if href and is_valid_url(urljoin(url, href), base_url) and
-                any(pattern.search(urljoin(url, href)) for pattern in PAYMENT_INDICATOR_REGEX)
-            ]
-            payment_urls = list(set(payment_urls))[:50]  # Limit to 50 URLs
+            # 🔍 Iframe scan
+            for frame in page.frames:
+                try:
+                    frame_url = frame.url
+                    if urlparse(link).netloc not in urlparse(frame_url).netloc:
+                        continue
+                    frame_html = await frame.content()
+                    await process_async(frame_html, frame_url)
+                except Exception as e:
+                    logger.warning(f"[Iframe] Failed to process {frame.url}: {e}")
+
+            # ✅ Collect links for further crawling
+            anchors = await page.eval_on_selector_all("a", "els => els.map(el => el.href)")
+            for a in anchors:
+                if base_url in a and a not in visited:
+                    results.append(a)
 
             await page.close()
-            return results + payment_urls
-        except PlaywrightTimeoutError:
-            logger.warning(f"Timeout crawling {url}")
-            return results
         except Exception as e:
-            logger.error(f"Error crawling {url}: {e}")
-            return results
+            logger.error(f"[Crawl Error] {link}: {e}")
+
+    return results
+
 
 async def crawl_website(base_url: str) -> List[Dict[str, Any]]:
     """Crawl website and collect results."""
@@ -419,6 +423,12 @@ async def crawl_website(base_url: str) -> List[Dict[str, Any]]:
             viewport={"width": 1280, "height": 720},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+
+        # Apply stealth to initial page
+        page = await context.new_page()
+        await stealth_async(page)  # ✅ Add this line
+        await page.goto(base_url)        # optional: close it after patching context
+
         semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks
         visited = set()
         to_crawl = [base_url]
