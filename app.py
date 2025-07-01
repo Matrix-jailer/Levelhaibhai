@@ -487,7 +487,6 @@ async def gatecheck(request: UrlRequest):
 
         # Crawl website with Playwright
         crawl_results = await crawl_website(base_url)
-
         # Network inspection with Selenium Wire
         network_results = []
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -522,6 +521,12 @@ async def gatecheck(request: UrlRequest):
     except Exception as e:
         logger.error(f"Error processing {base_url}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/gatecheck")
+async def gatecheck_get(url: HttpUrl = Query(..., description="Target URL to scan")):
+    """GET version of gatecheck, accepts ?url=https://example.com"""
+    return await gatecheck(UrlRequest(url=url))
+
 
 if __name__ == "__main__":
     import uvicorn
