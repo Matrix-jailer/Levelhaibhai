@@ -4,6 +4,10 @@ import time
 import re
 from typing import List, Dict, Any
 from urllib.parse import urlparse, urljoin
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, HttpUrl
 from concurrent.futures import ThreadPoolExecutor
@@ -443,17 +447,30 @@ def check_network_requests(url: str) -> Dict[str, Any]:
         "captcha": [],
         "cloudflare": False
     }
-
+    
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless=new")  # ✅ Optional, stealthier than old headless
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+    options.add_argument("--lang=en-US,en;q=0.9")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
 
     try:
         driver = webdriver.Chrome(options=options, seleniumwire_options={})
         driver.set_page_load_timeout(15)
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": """
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4] });
+            Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+            """
+        })
 
         try:
             driver.get(url)
