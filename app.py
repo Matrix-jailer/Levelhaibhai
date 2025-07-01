@@ -199,6 +199,11 @@ CAPTCHA_PATTERNS = {
     ]
 }
 
+CAPTCHA_PATTERNS = {
+    key: [re.compile(pat, re.IGNORECASE) for pat in patterns]
+    for key, patterns in CAPTCHA_PATTERNS.items()
+}
+
 CLOUDFLARE_INDICATORS = [re.compile(pattern, re.IGNORECASE) for pattern in [
     r'cloudflare', r'cf-ray', r'cf-chl-.*', r'__cf_bm', r'cf_clearance',
     r'cdn-cgi', r'challenge.cloudflare.com', r'Just a moment\.\.\.',
