@@ -381,7 +381,8 @@ async def crawl_url(link, context, visited, base_url, semaphore):
 
         try:
             page = await context.new_page()
-            await page.goto(link, timeout=15000, wait_until="networkidle")
+            await page.goto(link, timeout=15000, wait_until="domcontentloaded")
+
 
             # ✅ Main page scan
             try:
