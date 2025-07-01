@@ -1,7 +1,7 @@
 # Use official Python slim image
 FROM python:3.11-slim
 
-# Install system dependencies for Playwright, Chrome, and scraping tools
+# Install system dependencies for Chrome and Selenium Wire
 RUN apt-get update && apt-get install -y \
     wget \
     unzip \
@@ -22,8 +22,6 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxdamage1 \
     libxrandr2 \
-    libu2f-udev \
-    xdg-utils \
     libxss1 \
     libgbm1 \
     --no-install-recommends && rm -rf /var/lib/apt/lists/*
@@ -34,14 +32,14 @@ RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor
     apt-get update && apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver (compatible with Chrome stable)
-# Install ChromeDriver version 138.0.7204.92 to match Chrome 138
-RUN wget -O /tmp/chromedriver.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.92/linux64/chromedriver-linux64.zip && \
+# Install ChromeDriver (dynamically fetch version compatible with installed Chrome)
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+') && \
+    CHROMEDRIVER_VERSION=$(wget -qO- https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}) && \
+    wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
-    mv /usr/local/bin/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    mv /usr/local/bin/chromedriver /usr/local/bin/chromedriver && \
     chmod +x /usr/local/bin/chromedriver && \
     rm -rf /tmp/chromedriver.zip
-
 
 # Set working directory
 WORKDIR /app
@@ -50,10 +48,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and its browsers (Chromium, Firefox, WebKit)
-RUN pip install playwright && \
-    playwright install --with-deps
-
 # Copy application code
 COPY . .
 
@@ -61,5 +55,5 @@ COPY . .
 ENV PORT=8000
 EXPOSE 8000
 
-# Start the FastAPI app
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the FastAPI app (adjust 'main' to your Python file name)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
