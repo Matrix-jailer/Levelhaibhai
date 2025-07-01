@@ -2,14 +2,12 @@ import asyncio
 import re
 from typing import List, Dict, Set
 from fastapi import FastAPI, Query, HTTPException
-from pydantic import BaseModel
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import logging
 from urllib.parse import urljoin
-import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 
 # Setup logging with detailed output
@@ -84,33 +82,16 @@ def get_driver():
     })
     return driver
 
-# Async HTML fetching with browser-like headers
-async def fetch_html(url: str, semaphore: asyncio.Semaphore, timeout: int = 15) -> tuple:
+# Async HTML fetching using Selenium Wire
+async def fetch_html(url: str, semaphore: asyncio.Semaphore, driver, timeout: int = 15) -> tuple:
     async with semaphore:
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-            }
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=timeout, headers=headers, ssl=True) as response:
-                    if response.status == 200:
-                        return url, await response.text()
-                    else:
-                        logger.error(f"Failed to fetch {url}: HTTP {response.status}")
-                        return url, None
-        except aiohttp.ClientConnectionError as e:
-            logger.error(f"Connection error for {url}: {str(e)}")
-            return url, None
-        except aiohttp.ClientResponseError as e:
-            logger.error(f"Response error for {url}: {str(e)}")
-            return url, None
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout error for {url}: Request timed out after {timeout} seconds")
-            return url, None
+            driver.get(url)
+            driver.wait_for_request(url, timeout=timeout)
+            html = driver.page_source
+            return url, html
         except Exception as e:
-            logger.error(f"Unexpected error for {url}: {str(e)}")
+            logger.error(f"Failed to fetch {url} with Selenium Wire: {str(e)}")
             return url, None
 
 # Parse HTML for links
@@ -158,11 +139,11 @@ def analyze_page(html: str, requests: List, url: str) -> Dict:
 
     return result
 
-# Main crawling function with Selenium Wire fallback
+# Main crawling function
 async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 10) -> Dict:
     result = {
         "url": start_url,
-        "-payment_gateways": set(),
+        "payment_gateways": set(),
         "3d_secure": set(),
         "captcha": set(),
         "cloudflare": False
@@ -181,20 +162,14 @@ async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 
                     to_visit.remove(url)
                     if url not in visited:
                         visited.add(url)
-                        tasks.append(fetch_html(url, semaphore))
+                        tasks.append(fetch_html(url, semaphore, driver))
                 
                 responses = await asyncio.gather(*tasks, return_exceptions=True)
                 
                 for url, html in responses:
                     if not html:
-                        logger.warning(f"No HTML for {url}, falling back to Selenium Wire")
-                        try:
-                            driver.get(url)
-                            driver.wait_for_request(url, timeout=10)
-                            html = driver.page_source
-                        except Exception as e:
-                            logger.error(f"Selenium Wire fallback failed for {url}: {str(e)}")
-                            continue
+                        logger.warning(f"No HTML for {url}, skipping")
+                        continue
                     
                     # Parse links for crawling
                     links = parse_links(html, url)
