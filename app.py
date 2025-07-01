@@ -8,21 +8,16 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import logging
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
-import json
 
-# Setup logging
+# Setup logging with detailed output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # FastAPI app
 app = FastAPI()
-
-# Pydantic model for input
-class URLInput(BaseModel):
-    url: str
 
 # Regex patterns
 GATEWAY_KEYWORDS = {
@@ -75,7 +70,7 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--start-maximized")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
     
     driver = webdriver.Chrome(options=options, seleniumwire_options={})
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -89,17 +84,34 @@ def get_driver():
     })
     return driver
 
-# Async HTML fetching
-async def fetch_html(url: str, semaphore: asyncio.Semaphore, timeout: int = 10) -> tuple:
+# Async HTML fetching with browser-like headers
+async def fetch_html(url: str, semaphore: asyncio.Semaphore, timeout: int = 15) -> tuple:
     async with semaphore:
         try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            }
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=timeout) as response:
+                async with session.get(url, timeout=timeout, headers=headers, ssl=True) as response:
                     if response.status == 200:
                         return url, await response.text()
+                    else:
+                        logger.error(f"Failed to fetch {url}: HTTP {response.status}")
+                        return url, None
+        except aiohttp.ClientConnectionError as e:
+            logger.error(f"Connection error for {url}: {str(e)}")
+            return url, None
+        except aiohttp.ClientResponseError as e:
+            logger.error(f"Response error for {url}: {str(e)}")
+            return url, None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout error for {url}: Request timed out after {timeout} seconds")
+            return url, None
         except Exception as e:
-            logger.error(f"Error fetching {url}: {e}")
-    return url, None
+            logger.error(f"Unexpected error for {url}: {str(e)}")
+            return url, None
 
 # Parse HTML for links
 def parse_links(html: str, base_url: str) -> Set[str]:
@@ -121,7 +133,7 @@ def analyze_page(html: str, requests: List, url: str) -> Dict:
         "cloudflare": False
     }
 
-    # Check HTML for gateways and 3D secure
+    # Check HTML and network requests for gateways and 3D secure
     for gateway, patterns in GATEWAY_KEYWORDS.items():
         for pattern in patterns:
             if pattern.search(html) or any(pattern.search(str(req.url)) for req in requests):
@@ -146,11 +158,11 @@ def analyze_page(html: str, requests: List, url: str) -> Dict:
 
     return result
 
-# Main crawling function
+# Main crawling function with Selenium Wire fallback
 async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 10) -> Dict:
     result = {
         "url": start_url,
-        "payment_gateways": set(),
+        "-payment_gateways": set(),
         "3d_secure": set(),
         "captcha": set(),
         "cloudflare": False
@@ -175,25 +187,36 @@ async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 
                 
                 for url, html in responses:
                     if not html:
-                        continue
-                        
+                        logger.warning(f"No HTML for {url}, falling back to Selenium Wire")
+                        try:
+                            driver.get(url)
+                            driver.wait_for_request(url, timeout=10)
+                            html = driver.page_source
+                        except Exception as e:
+                            logger.error(f"Selenium Wire fallback failed for {url}: {str(e)}")
+                            continue
+                    
                     # Parse links for crawling
                     links = parse_links(html, url)
                     to_visit.update(links - visited)
                     
                     # Analyze with Selenium Wire
-                    driver.get(url)
-                    driver.wait_for_request(url, timeout=10)
-                    page_result = analyze_page(driver.page_source, driver.requests, url)
-                    
-                    # Aggregate results
-                    result["payment_gateways"].update(page_result["payment_gateways"])
-                    result["3d_secure"].update(page_result["3d_secure"])
-                    result["captcha"].update(page_result["captcha"])
-                    if page_result["cloudflare"]:
-                        result["cloudflare"] = True
+                    try:
+                        driver.get(url)
+                        driver.wait_for_request(url, timeout=10)
+                        page_result = analyze_page(driver.page_source, driver.requests, url)
                         
-                    driver.requests.clear()  # Clear requests to save memory
+                        # Aggregate results
+                        result["payment_gateways"].update(page_result["payment_gateways"])
+                        result["3d_secure"].update(page_result["3d_secure"])
+                        result["captcha"].update(page_result["captcha"])
+                        if page_result["cloudflare"]:
+                            result["cloudflare"] = True
+                        
+                        driver.requests.clear()  # Clear requests to save memory
+                    except Exception as e:
+                        logger.error(f"Error analyzing {url} with Selenium Wire: {str(e)}")
+                        continue
                 
     except Exception as e:
         logger.error(f"Error crawling {start_url}: {e}")
