@@ -274,7 +274,7 @@ def check_keywords(content: str, patterns: List[re.Pattern]) -> bool:
     return any(pattern.search(content) for pattern in patterns)
 
 async def check_page_content(page, url: str) -> Dict[str, Any]:
-    """Check page for keywords in specified locations."""
+    """Check page or frame for keywords in various locations."""
     results = {
         "payment_gateways": [],
         "3d_secure": [],
@@ -284,52 +284,56 @@ async def check_page_content(page, url: str) -> Dict[str, Any]:
 
     try:
         html = await page.content()
-        if hasattr(page, "frames"):
-            for frame in page.frames:
-                try:
-                    frame_url = frame.url
-                    if urlparse(url).netloc not in urlparse(frame_url).netloc:
-                        continue
-                    frame_html = await frame.content()
-                    for gateway, patterns in GATEWAY_KEYWORDS.items():
-                        if check_keywords(frame_html, patterns):
-                            results["payment_gateways"].append(gateway)
-                            if check_keywords(frame_html, THREE_D_SECURE_KEYWORDS):
-                                results["3d_secure"].extend([
-                                    kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(frame_html)
-                                ])
-                except Exception as iframe_err:
-                    logger.warning(f"[Iframe] Skipped frame due to error: {iframe_err}")
+
+        # Gateway detection
+        for gateway, patterns in GATEWAY_KEYWORDS.items():
+            if check_keywords(html, patterns):
+                results["payment_gateways"].append(gateway)
+                if check_keywords(html, THREE_D_SECURE_KEYWORDS):
+                    results["3d_secure"].extend([
+                        kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(html)
+                    ])
+
+        # Captcha detection
         for captcha_type, patterns in CAPTCHA_PATTERNS.items():
             if check_keywords(html, patterns):
                 results["captcha"].append(captcha_type)
 
+        # Cloudflare detection
         if check_keywords(html, CLOUDFLARE_INDICATORS):
             results["cloudflare"] = True
 
-        # Links and Buttons
+        # Links, buttons
         elements = await page.query_selector_all('a, button')
         for element in elements:
-            text = await element.inner_text() or ""
-            href = await element.get_attribute('href') or ""
-            for gateway, patterns in GATEWAY_KEYWORDS.items():
-                if check_keywords(text + href, patterns):
-                    results["payment_gateways"].append(gateway)
-                    if check_keywords(text + href, THREE_D_SECURE_KEYWORDS):
-                        results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(text + href)])
+            try:
+                text = await element.inner_text() or ""
+                href = await element.get_attribute('href') or ""
+                combined = text + " " + href
+                for gateway, patterns in GATEWAY_KEYWORDS.items():
+                    if check_keywords(combined, patterns):
+                        results["payment_gateways"].append(gateway)
+                        if check_keywords(combined, THREE_D_SECURE_KEYWORDS):
+                            results["3d_secure"].extend([
+                                kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(combined)
+                            ])
+            except:
+                continue  # Skip dead nodes
 
         # Forms
-        forms = await page.query_selector_all('form')
+        forms = await page.query_selector_all("form")
         for form in forms:
             form_html = await form.inner_html()
             for gateway, patterns in GATEWAY_KEYWORDS.items():
                 if check_keywords(form_html, patterns):
                     results["payment_gateways"].append(gateway)
                     if check_keywords(form_html, THREE_D_SECURE_KEYWORDS):
-                        results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(form_html)])
+                        results["3d_secure"].extend([
+                            kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(form_html)
+                        ])
 
         # Shadow DOM
-        shadow_content = await page.evaluate("""
+        shadow_html = await page.evaluate("""
             () => {
                 let content = '';
                 document.querySelectorAll('*').forEach(el => {
@@ -339,39 +343,26 @@ async def check_page_content(page, url: str) -> Dict[str, Any]:
             }
         """)
         for gateway, patterns in GATEWAY_KEYWORDS.items():
-            if check_keywords(shadow_content, patterns):
+            if check_keywords(shadow_html, patterns):
                 results["payment_gateways"].append(gateway)
-                if check_keywords(shadow_content, THREE_D_SECURE_KEYWORDS):
-                    results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(shadow_content)])
+                if check_keywords(shadow_html, THREE_D_SECURE_KEYWORDS):
+                    results["3d_secure"].extend([
+                        kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(shadow_html)
+                    ])
 
-        # Iframes
-        for frame in page.frames:
-            frame_html = await frame.content()
-            for gateway, patterns in GATEWAY_KEYWORDS.items():
-                if check_keywords(frame_html, patterns):
-                    results["payment_gateways"].append(gateway)
-                    if check_keywords(frame_html, THREE_D_SECURE_KEYWORDS):
-                        results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(frame_html)])
-
-        # Scripts
+        # Script content
         scripts = await page.evaluate("Array.from(document.scripts).map(s => s.src || s.innerHTML)")
-        scripts_content = " ".join(scripts)
         for gateway, patterns in GATEWAY_KEYWORDS.items():
-            if check_keywords(scripts_content, patterns):
+            if check_keywords(" ".join(scripts), patterns):
                 results["payment_gateways"].append(gateway)
-                if check_keywords(scripts_content, THREE_D_SECURE_KEYWORDS):
-                    results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(scripts_content)])
 
-        # Event Handlers
-        event_handlers = await page.evaluate("Array.from(document.querySelectorAll('[onclick]')).map(el => el.getAttribute('onclick'))")
-        event_content = " ".join(event_handlers)
+        # Inline JS events
+        onclicks = await page.evaluate("Array.from(document.querySelectorAll('[onclick]')).map(e => e.getAttribute('onclick'))")
         for gateway, patterns in GATEWAY_KEYWORDS.items():
-            if check_keywords(event_content, patterns):
+            if check_keywords(" ".join(onclicks), patterns):
                 results["payment_gateways"].append(gateway)
-                if check_keywords(event_content, THREE_D_SECURE_KEYWORDS):
-                    results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(event_content)])
 
-        # Deduplicate results
+        # Deduplication
         results["payment_gateways"] = list(set(results["payment_gateways"]))
         results["3d_secure"] = list(set(results["3d_secure"]))
         results["captcha"] = list(set(results["captcha"]))
