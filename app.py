@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import re
+from gologin import GoLogin
 from typing import List, Dict, Any
 from urllib.parse import urlparse, urljoin
 from selenium.webdriver.support import expected_conditions as EC
@@ -412,32 +413,53 @@ async def crawl_url(url: str, context, visited: set, base_url: str, semaphore: a
             return results
 
 async def crawl_website(base_url: str) -> List[Dict[str, Any]]:
-    """Crawl website and collect results."""
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks
-        visited = set()
-        to_crawl = [base_url]
-        all_results = []
+    """Crawl website and collect results using GoLogin stealth browser."""
+    from gologin import GoLogin
+    gologin = GoLogin({
+        "token": "YOUR_GLOGIN_TOKEN",       # 🔐 Replace with your real token
+        "profile_id": "YOUR_PROFILE_ID",    # 🆔 Replace with your real profile ID
+        "port": 3500
+    })
 
-        while to_crawl:
-            tasks = [crawl_url(url, context, visited, base_url, semaphore) for url in to_crawl[:10]]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            to_crawl = []
-            for result in results:
-                if isinstance(result, list):
-                    for item in result:
-                        if isinstance(item, dict):
-                            all_results.append(item)
-                        elif isinstance(item, str):
-                            to_crawl.append(item)
+    all_results = []
+    visited = set()
+    to_crawl = [base_url]
+    semaphore = asyncio.Semaphore(10)
 
-        await browser.close()
-        return all_results
+    try:
+        gologin.start()  # ⏯️ Start GoLogin browser session
+
+        async with async_playwright() as p:
+            # 🔌 Connect Playwright to GoLogin browser
+            browser = await p.chromium.connect_over_cdp("http://localhost:3500")
+            context = await browser.new_context(ignore_https_errors=True)
+
+            while to_crawl:
+                tasks = [crawl_url(url, context, visited, base_url, semaphore) for url in to_crawl[:10]]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                to_crawl = []
+                for result in results:
+                    if isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict):
+                                all_results.append(item)
+                            elif isinstance(item, str) and item not in visited:
+                                to_crawl.append(item)
+
+            await context.close()
+            await browser.close()
+
+    except Exception as e:
+        logger.error(f"[GoLogin Crawl Error] {base_url}: {e}")
+    finally:
+        try:
+            gologin.stop()
+        except Exception as stop_err:
+            logger.warning(f"[GoLogin] Failed to stop profile: {stop_err}")
+
+    return all_results
+
+
 
 def check_network_requests(url: str) -> Dict[str, Any]:
     """Inspect network requests using Selenium Wire."""
@@ -531,6 +553,15 @@ def check_network_requests(url: str) -> Dict[str, Any]:
     finally:
         if 'driver' in locals() and driver:
             driver.quit()
+        try:
+            await context.close()
+            await browser.close()
+        except Exception as e:
+            logger.warning(f"[Playwright Cleanup] {e}")
+        try:
+            gologin.stop()
+        except Exception as e:
+            logger.warning(f"[GoLogin Cleanup] {e}")
 
     return results
 @app.post("/gatecheck")
