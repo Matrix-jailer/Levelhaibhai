@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from urllib.parse import urlparse, urljoin
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, HttpUrl
+from concurrent.futures import ThreadPoolExecutor
 from pydantic import HttpUrl
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from seleniumwire import webdriver
