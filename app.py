@@ -448,45 +448,74 @@ def check_network_requests(url: str) -> Dict[str, Any]:
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     try:
         driver = webdriver.Chrome(options=options, seleniumwire_options={})
-        driver.set_page_load_timeout(10)
-        driver.get(url)
+        driver.set_page_load_timeout(15)
 
-        # Simulate human behavior
+        try:
+            driver.get(url)
+            logger.info(f"[Driver] Page loaded: {url}")
+        except Exception as load_err:
+            logger.warning(f"[Timeout] Page load skipped for {url}: {load_err}")
+            return results  # Not [] — keep return type consistent
+
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            logger.info(f"[Driver] DOM ready: {url}")
+        except Exception as wait_err:
+            logger.warning(f"[Wait] DOM not ready for {url}: {wait_err}")
+
+        # Scroll to mid-page
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
         time.sleep(random.uniform(0.1, 0.3))
 
-        # Check network requests
+        # Inspect network traffic
         for request in driver.requests:
-            request_content = (request.url + str(request.headers) + str(request.body) + str(request.response.body if request.response else ""))
-            for gateway, patterns in GATEWAY_KEYWORDS.items():
-                if check_keywords(request_content, patterns):
-                    results["payment_gateways"].append(gateway)
-                    if check_keywords(request_content, THREE_D_SECURE_KEYWORDS):
-                        results["3d_secure"].extend([kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(request_content)])
+            try:
+                request_content = (
+                    (request.url or "") +
+                    str(request.headers or "") +
+                    str(request.body or "") +
+                    str(request.response.body if request.response else "")
+                )
 
-            for captcha_type, patterns in CAPTCHA_PATTERNS.items():
-                if check_keywords(request_content, patterns):
-                    results["captcha"].append(captcha_type)
+                for gateway, patterns in GATEWAY_KEYWORDS.items():
+                    if check_keywords(request_content, patterns):
+                        results["payment_gateways"].append(gateway)
 
-            if check_keywords(request_content, CLOUDFLARE_INDICATORS):
-                results["cloudflare"] = True
+                        if check_keywords(request_content, THREE_D_SECURE_KEYWORDS):
+                            results["3d_secure"].extend([
+                                kw.pattern for kw in THREE_D_SECURE_KEYWORDS if kw.search(request_content)
+                            ])
 
+                for captcha_type, patterns in CAPTCHA_PATTERNS.items():
+                    if check_keywords(request_content, patterns):
+                        results["captcha"].append(captcha_type)
+
+                if check_keywords(request_content, CLOUDFLARE_INDICATORS):
+                    results["cloudflare"] = True
+
+            except Exception as req_err:
+                logger.debug(f"[Network Request Error] Skipped one request: {req_err}")
+
+        # Deduplicate results
         results["payment_gateways"] = list(set(results["payment_gateways"]))
         results["3d_secure"] = list(set(results["3d_secure"]))
         results["captcha"] = list(set(results["captcha"]))
 
     except Exception as e:
         logger.error(f"Error in network inspection for {url}: {e}")
+
     finally:
         if 'driver' in locals() and driver:
             driver.quit()
 
     return results
-
 @app.post("/gatecheck")
 async def gatecheck(request: UrlRequest):
     """FastAPI endpoint to check website for payment, 3D secure, CAPTCHA, and Cloudflare."""
