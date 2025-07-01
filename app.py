@@ -471,10 +471,12 @@ def check_network_requests(url: str) -> Dict[str, Any]:
     }
     
     options = Options()
-    options.add_argument("--headless=new")  # ✅ Optional, stealthier than old headless
+    options.add_argument("--headless=new")  # Or use "--headless=chrome" for consistency
     options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")  # REQUIRED when running as root
+    options.add_argument("--disable-dev-shm-usage")  # Prevents crashes in Docker
+    options.add_argument("--disable-blink-features=AutomationControlled")  # Anti-bot bypass
+    options.add_argument("--disable-infobars")  # Remove "Chrome is being controlled..." message
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--start-maximized")
     options.add_argument("--lang=en-US,en;q=0.9")
