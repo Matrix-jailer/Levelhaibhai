@@ -549,21 +549,13 @@ def check_network_requests(url: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Error in network inspection for {url}: {e}")
-
     finally:
         if 'driver' in locals() and driver:
             driver.quit()
-        try:
-            await context.close()
-            await browser.close()
-        except Exception as e:
-            logger.warning(f"[Playwright Cleanup] {e}")
-        try:
-            gologin.stop()
-        except Exception as e:
-            logger.warning(f"[GoLogin Cleanup] {e}")
-
     return results
+
+
+
 @app.post("/gatecheck")
 async def gatecheck(request: UrlRequest):
     """FastAPI endpoint to check website for payment, 3D secure, CAPTCHA, and Cloudflare."""
