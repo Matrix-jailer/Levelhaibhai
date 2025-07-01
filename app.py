@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 import re
-from gologin import GoLogin
 from typing import List, Dict, Any
 from urllib.parse import urlparse, urljoin
 from selenium.webdriver.support import expected_conditions as EC
@@ -413,53 +412,32 @@ async def crawl_url(url: str, context, visited: set, base_url: str, semaphore: a
             return results
 
 async def crawl_website(base_url: str) -> List[Dict[str, Any]]:
-    """Crawl website and collect results using GoLogin stealth browser."""
-    from gologin import GoLogin
-    gologin = GoLogin({
-        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODY0NDUyNDMyNGY2ZWJlMjFiMDU1MjUiLCJ0eXBlIjoiZGV2Iiwiand0aWQiOiI2ODY0NGExYjNjMzFhYjI0MjNiZDRmZWEifQ.uB9AXauDqnvbFJvZxgAgBqbrazLbmTRUbaJz403GVFQ",       # 🔐 Replace with your real token
-        "profile_id": "68644ae557b6fad0684ad064",    # 🆔 Replace with your real profile ID
-        "port": 3500
-    })
+    """Crawl website and collect results."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 720},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks
+        visited = set()
+        to_crawl = [base_url]
+        all_results = []
 
-    all_results = []
-    visited = set()
-    to_crawl = [base_url]
-    semaphore = asyncio.Semaphore(10)
+        while to_crawl:
+            tasks = [crawl_url(url, context, visited, base_url, semaphore) for url in to_crawl[:10]]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            to_crawl = []
+            for result in results:
+                if isinstance(result, list):
+                    for item in result:
+                        if isinstance(item, dict):
+                            all_results.append(item)
+                        elif isinstance(item, str):
+                            to_crawl.append(item)
 
-    try:
-        gologin.start()  # ⏯️ Start GoLogin browser session
-
-        async with async_playwright() as p:
-            # 🔌 Connect Playwright to GoLogin browser
-            browser = await p.chromium.connect_over_cdp("http://localhost:3500")
-            context = await browser.new_context(ignore_https_errors=True)
-
-            while to_crawl:
-                tasks = [crawl_url(url, context, visited, base_url, semaphore) for url in to_crawl[:10]]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                to_crawl = []
-                for result in results:
-                    if isinstance(result, list):
-                        for item in result:
-                            if isinstance(item, dict):
-                                all_results.append(item)
-                            elif isinstance(item, str) and item not in visited:
-                                to_crawl.append(item)
-
-            await context.close()
-            await browser.close()
-
-    except Exception as e:
-        logger.error(f"[GoLogin Crawl Error] {base_url}: {e}")
-    finally:
-        try:
-            gologin.stop()
-        except Exception as stop_err:
-            logger.warning(f"[GoLogin] Failed to stop profile: {stop_err}")
-
-    return all_results
-
-
+        await browser.close()
+        return all_results
 
 def check_network_requests(url: str) -> Dict[str, Any]:
     """Inspect network requests using Selenium Wire."""
@@ -471,12 +449,10 @@ def check_network_requests(url: str) -> Dict[str, Any]:
     }
     
     options = Options()
-    options.add_argument("--headless=new")  # Or use "--headless=chrome" for consistency
+    options.add_argument("--headless=new")  # ✅ Optional, stealthier than old headless
     options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")  # REQUIRED when running as root
-    options.add_argument("--disable-dev-shm-usage")  # Prevents crashes in Docker
-    options.add_argument("--disable-blink-features=AutomationControlled")  # Anti-bot bypass
-    options.add_argument("--disable-infobars")  # Remove "Chrome is being controlled..." message
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--start-maximized")
     options.add_argument("--lang=en-US,en;q=0.9")
@@ -551,13 +527,12 @@ def check_network_requests(url: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Error in network inspection for {url}: {e}")
+
     finally:
         if 'driver' in locals() and driver:
             driver.quit()
+
     return results
-
-
-
 @app.post("/gatecheck")
 async def gatecheck(request: UrlRequest):
     """FastAPI endpoint to check website for payment, 3D secure, CAPTCHA, and Cloudflare."""
