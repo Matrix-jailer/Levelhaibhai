@@ -481,7 +481,8 @@ def check_network_requests(url: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in network inspection for {url}: {e}")
     finally:
-        driver.quit()
+        if 'driver' in locals() and driver:
+            driver.quit()
 
     return results
 
