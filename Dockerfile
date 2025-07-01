@@ -54,8 +54,7 @@ COPY . .
 
 # Set environment and port
 ENV PORT=8000
-EXPOS
-E 8000
+EXPOSE 8000
 
 # Start the FastAPI app
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
