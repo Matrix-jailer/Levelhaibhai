@@ -416,8 +416,8 @@ async def crawl_website(base_url: str) -> List[Dict[str, Any]]:
     """Crawl website and collect results using GoLogin stealth browser."""
     from gologin import GoLogin
     gologin = GoLogin({
-        "token": "YOUR_GLOGIN_TOKEN",       # 🔐 Replace with your real token
-        "profile_id": "YOUR_PROFILE_ID",    # 🆔 Replace with your real profile ID
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODY0NDUyNDMyNGY2ZWJlMjFiMDU1MjUiLCJ0eXBlIjoiZGV2Iiwiand0aWQiOiI2ODY0NGExYjNjMzFhYjI0MjNiZDRmZWEifQ.uB9AXauDqnvbFJvZxgAgBqbrazLbmTRUbaJz403GVFQ",       # 🔐 Replace with your real token
+        "profile_id": "68644ae557b6fad0684ad064",    # 🆔 Replace with your real profile ID
         "port": 3500
     })
 
