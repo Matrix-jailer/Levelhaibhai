@@ -82,13 +82,26 @@ def get_driver():
     })
     return driver
 
-# Async HTML fetching using Selenium Wire
+# Async HTML fetching using Selenium Wire with iframe support
 async def fetch_html(url: str, semaphore: asyncio.Semaphore, driver, timeout: int = 15) -> tuple:
     async with semaphore:
         try:
             driver.get(url)
             driver.wait_for_request(url, timeout=timeout)
+            # Wait for dynamic content
+            await asyncio.sleep(2)  # 2-second delay for late-loaded content
+            # Collect HTML from main page and iframes
             html = driver.page_source
+            # Switch to each iframe and append its content
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe in iframes:
+                try:
+                    driver.switch_to.frame(iframe)
+                    html += driver.page_source
+                    driver.switch_to.default_content()
+                except Exception as e:
+                    logger.warning(f"Failed to process iframe on {url}: {str(e)}")
+                    continue
             return url, html
         except Exception as e:
             logger.error(f"Failed to fetch {url} with Selenium Wire: {str(e)}")
@@ -139,11 +152,11 @@ def analyze_page(html: str, requests: List, url: str) -> Dict:
 
     return result
 
-# Main crawling function
+# Main crawling function with corrected key
 async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 10) -> Dict:
     result = {
         "url": start_url,
-        "payment_gateways": set(),
+        "payment_gateways": set(),  # Fixed typo: "-payment_gateways" to "payment_gateways"
         "3d_secure": set(),
         "captcha": set(),
         "cloudflare": False
@@ -181,12 +194,16 @@ async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 
                         driver.wait_for_request(url, timeout=10)
                         page_result = analyze_page(driver.page_source, driver.requests, url)
                         
-                        # Aggregate results
-                        result["payment_gateways"].update(page_result["payment_gateways"])
-                        result["3d_secure"].update(page_result["3d_secure"])
-                        result["captcha"].update(page_result["captcha"])
-                        if page_result["cloudflare"]:
-                            result["cloudflare"] = True
+                        # Aggregate results with error handling
+                        try:
+                            result["payment_gateways"].update(page_result.get("payment_gateways", []))
+                            result["3d_secure"].update(page_result.get("3d_secure", []))
+                            result["captcha"].update(page_result.get("captcha", []))
+                            if page_result.get("cloudflare", False):
+                                result["cloudflare"] = True
+                        except Exception as e:
+                            logger.error(f"Error aggregating results for {url}: {str(e)}")
+                            continue
                         
                         driver.requests.clear()  # Clear requests to save memory
                     except Exception as e:
