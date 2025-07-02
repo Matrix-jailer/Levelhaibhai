@@ -393,7 +393,7 @@ def analyze_page(html: str, requests: List, url: str) -> Dict:
 async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 10) -> Dict:
     result = {
         "url": start_url,
-        "payment_gateways": set(),  # Fixed typo: "-payment_gateways" to "payment_gateways"
+        "payment_gateways": set(),
         "3d_secure": set(),
         "captcha": set(),
         "cloudflare": False
@@ -401,6 +401,8 @@ async def crawl_website(start_url: str, max_pages: int = 50, concurrency: int = 
     
     visited = set()
     to_visit = {start_url}
+    if should_skip_url(start_url):
+        logger.warning(f"Starting URL {start_url} matches skip criteria, but crawling anyway")
     semaphore = asyncio.Semaphore(concurrency)
     driver = get_driver()
     
