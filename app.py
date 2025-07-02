@@ -19,33 +19,36 @@ app = FastAPI()
 
 # Add these after the existing regex patterns
 ignore_if_url_contains = [
-    # Common asset/content folders
-    "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
+    re.compile(re.escape(kw), re.IGNORECASE) if not kw.startswith("http") else re.compile(re.escape(kw.lstrip("https://").lstrip("http://")), re.IGNORECASE)
+    for kw in [
+        # Common asset/content folders
+        "wp-content", "wp-includes", "skin/frontend", "/assets/", "/themes/", "/static/", "/media/", "/images/", "/img/",
 
-    "https://facebook.com", "https://googlemanager.com", "https://static.klaviyo.com", "static.klaviyo.com", "https://content-autofill.googleapis.com",
-    "content-autofill.googleapis.com", "https://www.google.com", "https://googleads.g.doubleclick.net", "googleads.g.doubleclick.net",
-    "https://www.googletagmanager.com", "googletagmanager.com", "https://www.googleadservices.com", "googleadservices.com", "https://fonts.googleapis.com",
-    "fonts.googleapis.com", "http://clients2.google.com", "clients2.google.com", "https://analytics.google.com", "hanalytics.google.com",
-    
-    # Analytics & marketing scripts
-    "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
-    "facebook.net", "fbcdn", "pixel.", "tiktokcdn", "matomo", "segment.io", "clarity.ms", "mouseflow", "hotjar", 
-    
-    # Fonts, icons, visual only
-    "fonts.", "fontawesome", ".woff", ".woff2", ".ttf", ".eot", ".otf", ".ico", ".svg",
-    
-    # CDN & framework scripts
-    "cdn.jsdelivr.net", "cloudflareinsights.com", "cdnjs", "bootstrapcdn", "polyfill.io", 
-    "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
-    
-    # Media, tracking images
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico", 
-    
-    # Useless scripts/styles
-    ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
+        "https://facebook.com", "https://googlemanager.com", "https://static.klaviyo.com", "static.klaviyo.com", "https://content-autofill.googleapis.com",
+        "content-autofill.googleapis.com", "https://www.google.com", "https://googleads.g.doubleclick.net", "googleads.g.doubleclick.net",
+        "https://www.googletagmanager.com", "googletagmanager.com", "https://www.googleadservices.com", "googleadservices.com", "https://fonts.googleapis.com",
+        "fonts.googleapis.com", "http://clients2.google.com", "clients2.google.com", "https://analytics.google.com", "hanalytics.google.com",
+        
+        # Analytics & marketing scripts
+        "googleapis", "gstatic", "googletagmanager", "google-analytics", "analytics", "doubleclick.net", 
+        "facebook.net", "fbcdn", "pixel.", "tiktokcdn", "matomo", "segment.io", "clarity.ms", "mouseflow", "hotjar", 
+        
+        # Fonts, icons, visual only
+        "fonts.", "fontawesome", ".woff", ".woff2", ".ttf", ".eot", ".otf", ".ico", ".svg",
+        
+        # CDN & framework scripts
+        "cdn.jsdelivr.net", "cloudflareinsights.com", "cdnjs", "bootstrapcdn", "polyfill.io", 
+        "jsdelivr.net", "unpkg.com", "yastatic.net", "akamai", "fastly", 
+        
+        # Media, tracking images
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".ico", 
+        
+        # Useless scripts/styles
+        ".css", ".scss", ".less", ".map", ".js", "main.js", "bundle.js", "common.js", "theme.js", "style.css", "custom.css",
 
-    # Other non-payment known paths
-    "/favicon", "/robots.txt", "/sitemap", "/manifest", "/rss", "/feed", "/help", "/support", "/about", "/terms", "/privacy",
+        # Other non-payment known paths
+        "/favicon", "/robots.txt", "/sitemap", "/manifest", "/rss", "/feed", "/help", "/support", "/about", "/terms", "/privacy",
+    ]
 ]
 
 NON_HTML_EXTENSIONS = {'.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.pdf', '.icon', '.img'}
@@ -295,18 +298,14 @@ def get_driver():
 
 
 def should_skip_url(url: str) -> bool:
-    """
-    Check if a URL should be skipped based on filtering criteria.
-    Returns True if the URL should be skipped, False otherwise.
-    """
     from urllib.parse import urlparse
 
     # Check for non-HTML extensions
     if any(url.lower().endswith(ext) for ext in NON_HTML_EXTENSIONS):
         return True
 
-    # Check for ignored keywords in URL
-    if any(keyword in url.lower() for keyword in ignore_if_url_contains):
+    # Check for ignored keywords in URL (using regex)
+    if any(pattern.search(url.lower()) for pattern in ignore_if_url_contains):
         return True
 
     # Check for skipped domains
